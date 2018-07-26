@@ -1,0 +1,104 @@
+/*
+a style file, to design the client website
+*/
+
+/*
+bg-color
+*/
+body {
+    background-color: GhostWhite;
+    padding: 25px;
+}
+
+div {
+    background-color: lightgrey;
+    
+    width: 1000px;
+    padding: 25px;
+    margin: auto;
+    text-align: center;
+}
+
+/*
+first "big" line
+*/
+h1 {
+    color:      DimGray;
+    font-family: Arial, Helvetica, sans-serif;
+    text-align: center;
+}
+
+/*table headers desgin*/
+#files_list {
+  margin: auto;
+  font-family: Arial, Helvetica, sans-serif;
+  text-align: center;
+}
+
+th {
+    cursor: pointer;
+}
+
+/*
+button design
+*/
+.button1 {
+    background-color: white;
+    color: black;
+    border: 2px solid #555555;
+}
+
+.button1:hover {
+    background-color: #555555;
+    color: white;
+}
+
+#log_reg_form {
+  width: 20%;
+  padding: 4px 12px;
+  margin: auto;
+  box-sizing: border-box;
+  -webkit-transition: 0.5s;
+  transition: 0.5s;
+  outline: none;
+}
+/*
+input type's desgin
+*/
+input[type=text] {
+    width: 75%;
+    padding: 4px 12px;
+    margin: 2px 0;
+    box-sizing: border-box;
+    border: 3px solid #ccc;
+    -webkit-transition: 0.5s;
+    transition: 0.5s;
+    outline: none;
+}
+
+input[type=text]:focus {
+    border: 2px solid #555;
+}
+
+input[type=password] {
+    width: 75%;
+    padding: 4px 12px;
+    margin: 2px 0;
+    box-sizing: border-box;
+    border: 3px solid #ccc;
+    -webkit-transition: 0.5s;
+    transition: 0.5s;
+    outline: none;
+}
+
+input[type=password]:focus {
+    border: 2px solid #555;
+}
+
+/*
+text's design
+*/
+
+p.sansserif {
+    font-family: Arial, Helvetica, sans-serif;
+}

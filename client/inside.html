@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Secured Cloud</title>
+    <!-- Scripts that we used for enc/dec and download -->
+    <script id="sjcl_script"    type="text/javascript" src="/libs/sjcl.js"></script>
+    <script id="aes_script"     type="text/javascript" src="/libs/aes.js"></script>
+    <script id="fsaver_script"  type="text/javascript" src="/libs/FileSaver.js"></script>
+    <script type="text/javascript" src="/libs/helper.js"></script>
+
+    <!-- style, to design the client website -->
+    <link rel="stylesheet" type="text/css" href="client/styles/style1.css">
+
+</head>
+
+<body> 
+    <div>
+        
+            
+            <!-- logout button! -->
+            <form id="logoutid" action="/logout" method="post" enctype="multipart/form-data" style="text-align:right;">
+              <input class="button button1" type="submit" value="logout">
+            </form>
+    
+            <h1>Files Cloud</h1>
+            
+            <!-- message -->
+            <p id='display'></p>
+            
+            <!-- message -->
+            <p id='debug_display'></p>
+            
+            <!-- display files -->
+            <button type="button" class="button button1" name="get_files" onclick="get_files();">refresh files</button>
+            
+            <input type="hidden" name="file_name">
+            <!-- files table -->
+            <table id='files_list'></table>
+            
+            <!-- upload ui -->
+            <p class="sansserif">
+            <form id="upload_form" action="/upload" method="post" enctype="multipart/form-data" onsubmit="return false;">
+              <input type="file" id="filestoupload" multiple="multiple" onchange="enableUploadSubmit();">
+              <input type="submit" class="button button1" id="up_button" value="Upload" onclick="parseFiles();" disabled> 
+            </form>
+            </p>
+            
+    </div>
+    
+    <script type="text/javascript">
+      
+      var xhttp = new XMLHttpRequest();
+      var files_meta = null;  // initiated at get_files() , 
+                              // invariant: if initiated and not used -> type(files_meta) is String
+                              // OR explicitly noted othewise in func description
+      
+      /*
+      a request to logout from the server
+      */
+      function logout() {
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) { 
+            display('oops logout');
+          }//if
+        };//onreadystatechange
+        xhttp.open('post', '/logout', true);
+        xhttp.send();
+      }//logout
+      
+      /*
+      func to enable the user to press the upload button
+      */
+      function enableUploadSubmit() {
+        document.getElementById('up_button').removeAttribute('disabled');
+        document.getElementById('up_button').focus();
+      }
+      
+      /*
+      parses the files when uploading new files, and calls the upload function.
+      the projects supports uploading only one file at a time, but as you can see,
+      there is a framework for uploading multiple files.
+      */
+      function parseFiles() {
+        document.getElementById('up_button').setAttribute('disabled', '');
+        var files_to_upload = document.getElementById("filestoupload").files;
+        var files_amount = files_to_upload.length;
+        for (var i = 0; i < files_amount; i++) {
+          let file = files_to_upload[i];
+          let lf = lookforName(file.name);
+          if (lf.ans) {
+            if (!confirm('Overwrite?\n\n'+file.name+' already exists.\nAre you sure you want to overwrite it? the file on server will be deleted.')) {
+              document.getElementById('up_button').removeAttribute('disabled');
+              document.getElementById('upload_form').reset();
+              continue;
+            }
+            else {
+              delete_file(lf.index, file);
+              return;
+            }
+          }
+          uploadFile(file);
+        }
+      }
+      
+      /*
+      uploads a single file to the server.
+      before uploading, it encrypts the file and updates the meta-file and metafile mac.
+      */
+      function uploadFile(file) {
+        var files_to_upload_obj = '{}';
+        var asyncEncSend = function (file) {
+          return new Promise(function(resolve, reject) {
+            enc_send(file, () => {
+              resolve();
+            });
+          });
+        }
+        var enc_send = function (file, callback) {
+          if (reader.error && (((reader.error).toString()).search('NotReadableError') >= 0)) {
+            alert('selected file was changed, please re-select the file');
+            return;
+          }
+          var datestr = new Date().toLocaleString();
+          var datestr = datestr.replace(/ /g, '_');
+          var msg = '{}', fileMetaJSON = '{}';
+          //enc
+          var data = encAndMAC(reader.result); 
+          var type = encAndMAC(file.type); 
+          var name = encAndMAC(file.name);
+          var fsize = enc((file.size).toString());        // file size
+          var dsize = enc((data.JSON.length).toString()); // encrypted data size;
+          fileMetaJSON = addElementsToJSON(fileMetaJSON,  {element:'fname',     value: JSON.parse(name.JSON)},
+                                                          {element:'fname_mac', value: name.mac},
+                                                          {element:'type',      value: JSON.parse(type.JSON)},
+                                                          {element:'type_mac',  value: type.mac},
+                                                          {element:'fsize',     value: JSON.parse(fsize)},
+                                                          {element:'dsize',     value: JSON.parse(dsize)},
+                                                          {element:'data_mac',  value: data.mac},
+                                                          {element:'upload_date', value: datestr});
+          var new_index = addToMetaFile(JSON.parse(fileMetaJSON));
+          var metaf_and_mac = encAndMAC(files_meta);
+          msg = addElementsToJSON(msg,  {element:'data', value: JSON.parse(data.JSON)},
+                                        {element:'metaf', value: JSON.parse(metaf_and_mac.JSON)},
+                                        {element:'newf', value: new_index},
+                                        {element:'metaf_mac', value: metaf_and_mac.mac});
+          files_to_upload_obj = addElementsToJSON(files_to_upload_obj, {element:name.mac, value: JSON.parse(msg)});
+          //send
+          xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) { // request finished && status OK
+                document.getElementById('upload_form').reset();
+                get_files();
+            }
+          };
+          xhttp.open('post', '/upload', true);
+          xhttp.setRequestHeader("Content-Type", "application/json");
+      
+          xhttp.send(files_to_upload_obj);
+          return callback();
+        };
+        var reader = new FileReader();
+        reader.readAsBinaryString(file);
+        reader.addEventListener("loadend", async function() {try {await asyncEncSend(file);} catch(e) {}}, false);
+      }
+      
+      /*
+      if files were found to be removed from the server by an intruder, 
+      the meta-file needs to be updated (after reporting the client).
+      this func updates the metafile, calculates a new mac for it and forwards
+      the new metafile along with the mac to the server.
+      */
+      function badRemoveFromMetaFile(files_toRemove) { // excepts files_meta to be OBJECT
+        for (var j = 0; j < files_toRemove.length; j++) {
+          delete files_meta[files_toRemove[j]];
+        }
+        var metaf_and_mac = encAndMAC(JSON.stringify(files_meta))
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) { 
+            get_files();
+          }
+        };
+        xhttp.open('post', '/bad_rem_from_meta', true);
+        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhttp.send("meta="+metaf_and_mac.JSON+"&mac="+metaf_and_mac.mac);
+      }
+      
+      /*
+      removes all or some user files from the server,
+      and remove the relevant data from the meta-data file.
+      called when an infection was detected - this is a place for -
+      a future (not learned on class) more advanced action.
+      */
+      function quarantineFiles() { 
+        var files_to_del;
+        if (arguments.length==1) {
+          var filesToQuara = arguments[0];
+          files_to_del = filesToQuara.join(',');
+          for (var j = 0; j < filesToQuara.length; j++) {
+            deleteFromMetaFile(filesToQuara[j]);
+          }
+        }
+        else {
+          files_meta = '{}';
+          files_to_del = 'all';
+        }
+        var metaf_and_mac = encAndMAC(files_meta);
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) { 
+            get_files();
+          }//if
+        };//onreadystatechange
+        xhttp.open('post', '/quarantine_files', true);
+        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhttp.send("meta="+metaf_and_mac.JSON+"&mac="+metaf_and_mac.mac+"&files="+files_to_del);
+      }
+      
+      /*
+      requests this user's meta-data file from server,
+      and displays the files meta-data on the client page.
+      receives from the server the metafile, the metafile mac and a list of (file indexes, file size in server).
+      this function also checks validity of the metafile by calculating its mac
+      and comparing it with the received mac, reporting the user for corruption if necessary.
+      this function also checks the files amount in the server (received file indexes list's length),
+      and compares it with the files amount on the metafile (after decrypting it).
+      the func is also displays the meta-data content of this user's files, 
+      and bulids the files table.
+      this function also checks for file size unwanted changes.
+      */
+      function get_files() {
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) { // request finished && status OK
+            var files_html = '';
+            var received_obj = JSON.parse(this.responseText);
+            var received_mac = received_obj.mac;
+            var calculated_mac = mac(JSON.stringify(received_obj.metaf));
+            var files_on_server = received_obj.files_on_server;
+            var files_amount_server = files_on_server.length;
+            var files_amount_meta, keys;
+            /*
+            func to check if the metafile is corrupted => 
+            if an intruder changes the metafile we'll see that calculated-mac != received-mac.
+            in such case- alerts the user and removes the relevant files,
+            otherwise, if equal => returns true.
+            */
+            var macCorrupted = function(calc_mac, received_mac) {
+              if (calc_mac != received_mac) {
+                alert('FATAL ERROR\n\nProperties of one or more files are corrupted.\nfiles data may still be valid.\nplease contact server admin.');
+                document.getElementById('files_list').innerHTML = files_html;
+                files_meta = JSON.stringify(files_meta);
+                quarantineFiles();
+                return true;
+              }
+              return false;
+            }
+            /*
+            retrives the metafile, decrypts it,
+            and updates files_meta to the decrypted value.
+            */
+            var retriveMetaFile = function() {
+              if (JSON.stringify(received_obj.metaf) === '{}') {
+                files_meta = JSON.parse('{}');
+              }
+              else {
+                files_meta = dec(JSON.stringify(received_obj.metaf));
+                files_meta = JSON.parse(files_meta);
+              }
+              keys = Object.keys(files_meta);
+              files_amount_meta = keys.length;
+            }
+            /*
+            func to check the validity of amount of files =>
+            if server_files_amount != metafile_files_amount =>
+            display "error" for the user, delete the relevant files,
+            and return false.
+            otherwise => return true.
+            */
+            var checkFilesAmount = function(amount_on_meta, amount_on_server) {
+              if (amount_on_meta > amount_on_server) {
+                var removed_files_keys = [];
+                var removed_files_names = [];
+                for (var i = 0; i < keys.length; i++) {
+                  var curr_key = keys[i];
+                  var curr_file = curr_key.slice(1, keys[i].length);
+                  var k;
+                  for (k = 0; k < amount_on_server; k++) {
+                    if (curr_file == files_on_server[k].name) break; 
+                  }
+                  if (k == amount_on_server) {
+                    removed_files_keys.push(curr_key);
+                    removed_files_names.push(dec(JSON.stringify(files_meta[curr_key].fname)));
+                  }
+                }
+                alert('ATTENTION\n'+removed_files_names.join(', ')+'\nremoved!');
+                badRemoveFromMetaFile(removed_files_keys);
+                return false;
+              }
+              else if (amount_on_meta < amount_on_server) {
+                alert('ATTENTION\none of more files were added to your directory on server, without your will.\nplease contact server admin.');
+                return false;
+              }
+              return true;
+            }
+            /*
+            func to check validty of the size of the files. for every file,
+            it checks if server-file-size != metafile-currfile-size,
+            if equal => true, otherwise => return false and alert "error" for the user,
+            and "quarantines" (deletes) the relevant ("infected") files.
+            */
+            var checkFilesSizes = function() {
+              var size_changed_files = [];
+              var size_changed_files_indexes = [];
+              for (var i = 0; i < files_amount_server; i++) {
+                var curr_file = files_on_server[i];
+                var curr_meta_index = '_'+curr_file.name;
+                var curr_fsize = dec(JSON.stringify(files_meta[curr_meta_index].dsize));
+                if (curr_fsize != curr_file.size) {
+                  size_changed_files_indexes.push(parseInt(curr_meta_index.slice(1, curr_meta_index.length)));
+                  size_changed_files.push(dec(JSON.stringify(files_meta[curr_meta_index].fname)));
+                }
+              }
+              if (size_changed_files.length > 0) {
+                alert('ATTENTION\nfile size was changed:\n'+size_changed_files.join("\n")+'\ndeleting changed files');
+                files_meta = JSON.stringify(files_meta);
+                quarantineFiles(size_changed_files_indexes);
+                return false;
+              }
+              return true;
+            }
+            
+            /*
+            func to create the files meta-data table, for the user to see
+            the files he has on the server, and their meta-data => date, size, etc..
+            and to help him to manage files, by op's => delete, rename, download, upload, etc...
+            */
+            var createFilesTable = function() {
+              files_html = `<p class="sansserif">`;
+              if (files_amount_meta > 0) {
+                files_html += '<tr><th onclick="sort(0);">File</th> <th onclick="sort(1);">Type</th> <th onclick="sort(2);">Size (Bytes)</th> <th onclick="sort(3);">Upload Time</th></tr>';
+              }
+              else {
+                files_html+="</p>"
+                document.getElementById('files_list').innerHTML = files_html;
+                return ;
+              }
+              for (var i = 0; i < files_amount_meta; i++) { // table build
+                var curr_key = keys[i];
+                var real_i = parseInt(curr_key[1]);
+                var msg = '';
+                var file = files_meta[curr_key];
+                var file_name = dec(JSON.stringify(file.fname));
+                var file_type = dec(JSON.stringify(file.type));
+                var file_udate = file.upload_date.replace(/_/g, ' ');
+                var file_size = dec(JSON.stringify(file.fsize));
+                
+                files_html += '<tr>';
+                files_html += '<td id=\''+real_i+'\' name="fname">'+file_name+'</td>';
+                files_html += '<td id=type'+real_i+'>'+file_type+'</td>';
+                files_html += '<td>'+file_size+'</td>';
+                files_html += '<td>'+file_udate+'</td>';
+                files_html += '<td><button class="button button1" type="button" onclick="rename_helper('+real_i+');" id="rn'+real_i+'">rename</button></td>';
+                files_html += '<td><button type="button" class="button button1" onclick="delete_file('+real_i+');">delete</button></td>';
+                files_html += '<td><button type="button" class="button button1" onclick="download_file('+real_i+');">download</button></td>';
+                files_html += '<td id="msgfor'+real_i+'">'+msg+'</td>';
+                files_html += '</tr>';
+
+                files_html+="</p>"
+              }
+              document.getElementById('files_list').innerHTML = files_html;
+            }
+            
+            if (macCorrupted(calculated_mac, received_mac)) return;
+            retriveMetaFile();
+            if (!checkFilesAmount(files_amount_meta, files_amount_server)) return;
+            if(!checkFilesSizes()) return;
+            createFilesTable();
+            files_meta = JSON.stringify(files_meta);
+          }
+        };
+        xhttp.open('post', '/get_files', true);
+        xhttp.send();
+      }
+      
+      /*
+      func to download-file, gets index of file in the metafile.
+      receives encrypted filedata from the server checks authentication, 
+      deceypts it, and prompts the client with a "save-as" popup.
+      */
+      function download_file(index) {
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) {
+            files_meta = JSON.parse(files_meta);
+            var data = this.responseText;
+            var data_mac = files_meta['_'+index].data_mac;
+            var type_json = JSON.stringify(files_meta['_'+index].type);
+            var fname_json = JSON.stringify(files_meta['_'+index].fname);
+            var fname, type, decrypted_data;
+            if (mac(data) != data_mac) {
+              alert('FILE CHANGED !\n\ndeleting file.');
+              files_meta = JSON.stringify(files_meta);
+              delete_file(index);
+              return;
+            }
+            decrypted_data = dec(data);
+            type = dec(type_json);
+            fname = dec(fname_json);
+            strToFileSave(decrypted_data, type, fname);
+            files_meta = JSON.stringify(files_meta);
+            get_files();
+          }
+        };
+        xhttp.open('post', '/download_file', true);
+        xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+        xhttp.send("file="+index);
+      }
+      
+      /*
+      html manipuations to get the effect seen when pressing the rename button (one time).
+      replaces the name of the file with an input box to fill in the new filw name.
+      */
+      function rename_helper(index) {
+        var old_fname = document.getElementById(index).innerText;
+        document.getElementById(index).innerHTML = '<input type="text" id="new_name'+index+'" value="'+old_fname+'" required>';
+        document.getElementById('rn'+index).setAttribute('onclick', 'rename_file('+index+');');
+      }
+      
+      /*
+      gets the files index in the metafile, 
+      and updates the metafile with the new-name.
+      encrypts the new metafile, calculates mac to the new metafile,
+      and sends the new metafile to the server with the request.
+      */
+      function rename_file(index){
+        var new_name = document.getElementById('new_name'+index).value;
+        var metaf_and_mac;
+        var msg = '{}';
+        new_name = encAndMAC(new_name);
+        files_meta = JSON.parse(files_meta);
+        files_meta['_'+index].fname = JSON.parse(new_name.JSON);
+        files_meta['_'+index].fname_mac = new_name.mac;
+        metaf_and_mac = encAndMAC(JSON.stringify(files_meta));
+        // pack msg
+        msg = addElementsToJSON(msg,  {element: 'metaf', value: JSON.parse(metaf_and_mac.JSON)},
+            {element: 'metaf_mac', value: metaf_and_mac.mac}); 
+        files_meta = JSON.stringify(files_meta);
+        //send msg
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) { 
+            get_files();
+          }
+        };
+        xhttp.open('post', '/rename', true);
+        xhttp.setRequestHeader("Content-Type", "application/json");
+        xhttp.send(msg);
+      }
+      
+      /*
+      func to delete-file, gets file_index in the metafile,
+      changes the metafile (delete the relevant file from the meta-file),
+      encrypts the new metafile, calculates mac to the new metafile,
+      and sends the new metafile to the server with the request.
+      */
+      function delete_file(file_index) {
+        var msg = '{}';
+        var metaf_and_mac;
+        var fileToUpload_onCompletion = null;
+        if (arguments.length == 2) fileToUpload_onCompletion = arguments[1];
+        deleteFromMetaFile(file_index);
+        metaf_and_mac = encAndMAC(files_meta);
+        // pack msg
+        msg = addElementsToJSON(msg,  {element: 'index', value: file_index},
+              {element: 'metaf', value: JSON.parse(metaf_and_mac.JSON)},
+              {element: 'metaf_mac', value: metaf_and_mac.mac});
+        // send msg
+        xhttp.onreadystatechange = function () {
+          if (this.readyState == 4 && this.status == 200) { 
+            if (fileToUpload_onCompletion) uploadFile(fileToUpload_onCompletion);
+            else get_files();
+          }
+        };
+        xhttp.open('post', '/delete_file', true);
+        xhttp.setRequestHeader("Content-Type", "application/json");
+        xhttp.send(msg);
+      }
+      
+      get_files();
+      
+    </script>
+</body>
+
+</html>

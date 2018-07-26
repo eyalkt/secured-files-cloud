@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<!-- 
+    this page, is the page that a user will see if he is yet to be registered,
+    and the page a user see if he is logged out.
+-->
+
+  <head>
+      <meta charset="UTF-8">
+      <title>Secured Cloud</title>
+      <script id="sjcl_script" type="text/javascript" src="/libs/sjcl.js"></script>
+      <script id="aes_script" type="text/javascript" src="/libs/aes.js"></script>
+
+      <!-- style, to design the client website -->
+      <link rel="stylesheet" type="text/css" href="client/styles/style1.css">
+
+  </head>
+
+  <body>
+      
+          <div>
+              
+              <p class="sansserif">
+              <h1 style="text-align:center";>Welcome!</h1>
+              
+              <p id='display'></p>
+              <!-- login-form -->
+              <form id="log_reg_form" name="loginform" onsubmit="return false;" method="post" style="text-align:center;">
+                 <!-- input of user name -->
+                 User Name:
+                 <br>
+                 <input type="text" name="username" required autofocus><br>
+                 <!-- input of password -->
+                 Password:
+                 <br>
+                 <input id="1a1" type="password" name="psw" maxlength="10" required><br><br>
+                 <input type="hidden" name="req_type">
+                 
+                 <p class="serif">
+                 <input type="submit" class="button button1" name="login" value="Login" onclick="req_type.value='login';parseInputs();">
+                 <input type="submit" class="button button1" name="register" value="Register" onclick="req_type.value='register';parseInputs();">
+                 </p>
+              </form>
+              
+          </div>
+      
+      <script type="text/javascript">
+        
+        var xhttp = new XMLHttpRequest();
+        
+        /*
+        parses the given username and password.
+        checks if the inputs qualify the restrictions (length, amount of capital letters etc.) 
+        initializes the user keys. hashes the username, and forwords the request (login/register) -
+        to the server.
+        */
+        function parseInputs() { //encryption and authentication
+          var hashed_uname, action;
+          
+          if (!checkInputs()) {
+           alert('invalid username or password , rules are\n\n'+
+                   'psw should have, at least:\n'+
+                   '1. 2 nums\n2. 2 capital letters\n3. 2 non-capital letters\n4. max 10 chars\n5. not more than 2 same chars\n\n'+
+                   'username, should contain:\n1. at least 6 chars, max 10 chars\n2. at least 1 number\n3. at least 1 capital char\n4. at least 1 non-capital char\n5. max 2 same chars');
+           return;
+          }
+          initializeKeys();
+          if (document.loginform.req_type.value == 'login') 
+            action = '/login';
+          else action = '/register';
+          uname = document.loginform.username.value;
+          hashed_uname = hashID(uname);
+          
+          xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) { 
+              switch (this.responseText) {
+                case 'WID':
+                  alert('Wrong ID , try again.');
+                  return;
+                case 'WPS':
+                  alert('Wrong Password , try again.');
+                  return;
+                case 'UAE':
+                  alert('User '+uname+' already exists , try another one.');
+                  return;
+                default:
+                  var meta_mac = mac(this.responseText);
+                  if (action == '/register') updateMetaMac(meta_mac);
+                  else refreshPage();  // login - refresh page (will get inside)
+                  break;
+              }
+            }
+          };
+          xhttp.open('post', action, true);
+          xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+          xhttp.send("username="+hashed_uname+"&psw="+sessionStorage.login_key);
+        }
+        
+        /*
+        derives the user keys from the user given password,
+        and sets them in the sessionStorage to be seen in inside.html
+        */
+        function initializeKeys() { // derive keys from user given pass , by hashing
+          var encryption_key = '1', authentication_key = '2', login_key = '3';
+          var input_password = document.loginform.psw.value;
+          
+          encryption_key = sjcl.hash.sha256.hash(input_password+encryption_key);
+          encryption_key = sjcl.codec.hex.fromBits(encryption_key);
+          
+          authentication_key = sjcl.hash.sha256.hash(input_password+authentication_key);
+          authentication_key = sjcl.codec.hex.fromBits(authentication_key);
+          
+          login_key = sjcl.hash.sha256.hash(input_password+login_key);
+          login_key = sjcl.codec.hex.fromBits(login_key);
+          
+          sessionStorage.enc_key = encryption_key; 
+          sessionStorage.auth_key = authentication_key; 
+          sessionStorage.login_key = login_key; 
+        }
+        
+        /*
+        func to hashID, using sjcl library, gets id, and make hash from this id.
+        */
+        function hashID(id) {
+          var hashed_id = sjcl.hash.sha256.hash(id);
+          hashed_id = sjcl.codec.hex.fromBits(hashed_id);
+          return hashed_id;
+        }
+        
+        /*
+        gets msg, and, using the authentication key, and sjcl library, calculates this msg mac.
+        */
+        function mac(msg) {
+          var key = sjcl.codec.utf8String.toBits(sessionStorage.auth_key);
+          var out = (new sjcl.misc.hmac(key, sjcl.hash.sha256)).mac(msg);
+          var hmac = sjcl.codec.hex.fromBits(out)
+          return hmac;
+        }
+        
+        /*
+        func to refresh this page
+        */
+        function refreshPage() {
+          var loc = window.location.href.split('/');
+          window.location.assign(loc[0]+'/');
+        }
+        
+        /*
+        func to update-meta-mac in the server. 
+        on registarion, a new meta-file of this user, is created in the server,
+        with a temporary mac. this function updates this mac to a real one.
+        */
+        function updateMetaMac(new_mac) {
+          xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) {
+              refreshPage();
+            }
+          };
+          xhttp.open('post', '/first_login', true);
+          xhttp.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+          xhttp.send("mac="+new_mac);
+        }
+        
+        /*
+        func to check if the username and the password
+        stands our terms => username and password need to be
+        "hard to guess", the terms is commented below.
+        */
+        function checkInputs() {
+          
+          return  check_password(document.loginform.psw.value) && 
+                  check_username(document.loginform.username.value) ;
+
+          /*
+          func to check if char input is a number
+          */
+          function is_num(char) {
+            if(char>=0&&char<=9)
+              return 1;
+            return 0;
+          }
+
+          /*
+          func to check if pass contain at least 2 num's
+          */
+          function check_nums(pass) {
+            var ndigits=0;
+            for(var i=0;i<pass.length;i++){
+              if(pass[i]>=0&&pass[i]<=9){
+                ndigits++;
+              }//if
+            }//for
+            if(ndigits<2){
+              return 0;
+            }
+            return 1;
+          }
+
+          /*
+          func to check if there are at least 2 'big' (capital) chars
+          in pass
+          */
+          function check_big(pass) {
+            var nbigs=0;
+            for(var i=0;i<pass.length;i++){
+              if(pass[i]==pass[i].toUpperCase()&&!is_num(pass[i])){
+                nbigs++;
+              }//if
+            }//for
+            if(nbigs<2){
+              return 0;
+            }//if
+            return 1;
+          }
+
+          /*
+          func to check if there is at least 2 'small'
+          letters in pass
+          */
+          function check_small(pass){
+            var nsmalls=0;
+            for(var i=0;i<pass.length;i++){
+              if(pass[i]==pass[i].toLowerCase()&&!is_num(pass[i])){
+                  nsmalls++; 
+              }//if
+            }//for
+            if(nsmalls<2){
+              return 0;
+            }
+            return 1;
+          }
+          /*
+          func to check that pass length is smaller that 11 chars length
+          */
+          function check_max(pass){
+            if(pass.length>10){
+              return 0;
+            }//ig
+            return 1;
+          }
+          /*
+          func to check if char is in pass more than one time
+          */
+          function check_same_char(pass,char,idx){
+            for(var i=0;i<pass.length;i++){
+              if(pass[i]==char&&i!=idx){
+                //equal,but,it is not the same elemnt
+                return 0;
+              }//if
+            }//for
+            return 1;
+          }
+
+          /*
+          func to check that pass contain maximum 2 same chars
+          */
+          function check_same(pass){
+            var nsames=0;
+            for(var i=0;i<pass.length;i++){
+              if(!check_same_char(pass,pass[i],i)){
+                nsames++;
+              }//if
+            //check same input twice(8right=8left,8left=8right)
+            }//for
+            if(nsames>=4){
+              return 0;
+            }//if
+            return 1;
+          }
+
+          /*
+          func to check validity of password
+          password should have, at least:
+          1. 2 nums
+          2. 2 capital letters
+          3. 2 non-capital letters
+          4. max 10 chars
+          5. not more than 2 same chars
+          */
+          function check_password(pass){
+            if(!check_nums(pass))
+              return 0;
+            if(!check_big(pass))
+              return 0;
+            if(!check_small(pass))
+              return 0;
+            if(!check_max(pass))
+              return 0;
+            if(!check_same(pass))
+              return 0;
+            return 1;
+          }
+          
+          /*
+          func to check username length is between 6 to 10.
+          */
+          function check_length(username){
+            if(username.length<6||username.length>10){
+                return 0;
+            }
+            return 1;
+          }
+
+          /*
+          func to check that username contains
+          at least one number
+          */
+          function check_nums_1(username){
+            var n_nums=0;
+            for(var i=0;i<username.length;i++){
+                if(username[i]>=0&&username[i]<=9){
+                    n_nums++;
+                }//if
+            }//for
+            if(n_nums==0){
+                return 0;
+            }
+            return 1;
+          }
+
+          /*
+          func to check that username contains
+          at least one capital letter
+          */
+          function check_big_1(username){
+            var n_bigs=0
+            for(var i=0;i<username.length;i++){
+                if(username[i]==username[i].toUpperCase()&&
+                    !is_num(username[i])){
+                        n_bigs++;
+                }//if
+            }//for
+            if(n_bigs==0){
+                return 0;
+            }
+            return 1;
+          }
+          /*
+          func to check that username contain at least
+          one 'small' letter
+          */
+          function check_small_1(username){
+            var n_smalls=0;
+            for(var i=0;i<username.length;i++){
+                if(username[i]==username[i].toLowerCase()&&
+                        !is_num(username[i])){
+                            n_smalls++; 
+                }//if
+            }//for
+            if(n_smalls==0){
+                return 0;
+            }
+            return 1;
+          }
+                /*
+          function the check validity of username
+          username, should contain
+          1. at least 6 chars, max 10 chars
+          2. at least 1 number
+          3. at least 1 capital char
+          4. at least 1 non-capital char
+          5. max 2 same chars
+          */
+          function check_username(username){
+            if(!check_length(username))
+               return 0;
+            if(!check_nums_1(username))
+               return 0;
+            if(!check_big_1(username))
+               return 0;
+            if(!check_small_1(username))
+               return 0;
+            if(!check_same(username))
+               return 0;
+            return 1;
+          }
+          
+        }
+        
+      </script>
+  </body>
+
+</html>
