@@ -4,7 +4,7 @@ CS project
 <strong>Server:</strong><br>
 Installation and Running:<br>
 First, make sure node.js is installed in your system (https://nodejs.org/en/).<br>
-Node.js is multi platform, though this project was written and tested on a Windows machine.<br>
+This project was written and tested on a Windows machine.<br>
 
 1. Open the command-line.
 2. Get (cd) into the ‘secured-files-cloud’ folder.
